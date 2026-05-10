@@ -6,6 +6,7 @@ import sys
 
 import yaml
 
+import mw2wj.template_plugins  # noqa: F401 — loads builtin plugins
 from mw2wj.converter import convert_revision
 from mw2wj.importer import ImportStats, import_files, import_pages
 from mw2wj.models import ConversionContext
@@ -27,13 +28,18 @@ def load_config(path: str) -> dict:
 	return config
 
 
-def run(config_path: str, dry_run: bool = False) -> None:
+def run(config_path: str, dry_run: bool = False, log_level: int = logging.INFO, skip_failed: bool = False) -> None:
 	config = load_config(config_path)
 
 	if dry_run:
 		config["dry_run"] = True
 
-	setup_logging(logging.DEBUG if config.get("dry_run") else logging.INFO)
+	# Verbose/quiet flags override the default, but dry-run mode
+	# still bumps to DEBUG unless the user explicitly set quiet.
+	if log_level != logging.INFO or not config.get("dry_run"):
+		setup_logging(log_level)
+	else:
+		setup_logging(logging.DEBUG)
 
 	dry_run_mode = config.get("dry_run", False)
 	logger.info("Starting %s", "dry run" if dry_run_mode else "import")
@@ -53,14 +59,31 @@ def run(config_path: str, dry_run: bool = False) -> None:
 		exclude_namespaces=config.get("exclude_namespaces", []),
 		lowercase_paths=config.get("lowercase_paths", False),
 		template_fallback=config.get("template_fallback", "error"),
+		preprocess_rules=config.get("preprocess_rules", []),
 	)
 
 	total_revisions = sum(len(p.revisions) for p in dump.pages)
 	logger.info("Phase 2: Converting %d pages (%d revisions total)", len(dump.pages), total_revisions)
 
 	for page in dump.pages:
+		# Template namespace pages contain definition logic
+		# (parser functions, {{{param}}} syntax) that pandoc
+		# cannot parse — skip them.
+		if page.namespace == 10:
+			logger.debug("Skipping template page '%s'", page.title)
+			continue
+		ctx.current_namespace = page.namespace
 		for rev in page.revisions:
-			convert_revision(rev, ctx)
+			try:
+				convert_revision(rev, ctx)
+			except RuntimeError as e:
+				logger.error(
+					"Conversion failed for page '%s' (rev %d): %s",
+					page.title, rev.id, e,
+				)
+				if skip_failed:
+					continue
+				raise
 	logger.info("Conversion complete")
 
 	if dry_run_mode:
@@ -119,11 +142,34 @@ def main() -> None:
 		action="store_true",
 		help="Parse and convert only, do not import (overrides config setting)",
 	)
+	verbosity = parser.add_mutually_exclusive_group()
+	verbosity.add_argument(
+		"-v", "--verbose",
+		action="store_true",
+		help="Enable debug-level logging",
+	)
+	verbosity.add_argument(
+		"-q", "--quiet",
+		action="store_true",
+		help="Suppress info messages, show warnings and errors only",
+	)
+	parser.add_argument(
+		"--skip-failed",
+		action="store_true",
+		help="Continue importing even if some pages fail to convert",
+	)
 
 	args = parser.parse_args()
 
+	if args.verbose:
+		log_level = logging.DEBUG
+	elif args.quiet:
+		log_level = logging.WARNING
+	else:
+		log_level = logging.INFO
+
 	try:
-		run(args.config, args.dry_run)
+		run(args.config, args.dry_run, log_level, args.skip_failed)
 	except FileNotFoundError as e:
 		logger.error("File not found: %s", e)
 		sys.exit(1)

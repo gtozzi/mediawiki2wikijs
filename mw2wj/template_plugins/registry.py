@@ -20,7 +20,8 @@ class TemplatePluginRegistry:
 		return self._plugins.get(template_name.lower())
 
 	def convert(self, template: Template, context: ConversionContext) -> str:
-		plugin = self.get(template.name.strip())
+		name = template.name.strip()
+		plugin = self.get(name)
 		if plugin is not None:
 			return plugin.convert(template, context)
 
@@ -29,17 +30,15 @@ class TemplatePluginRegistry:
 			summary = ", ".join(params[:3])
 			if len(params) > 3:
 				summary += ", ..."
-			result = f"[Template: {template.name.strip()}]"
+			result = f"[Template: {name}]"
 			if summary:
 				collapsed = " ".join(summary.split())
 				if len(collapsed) > 120:
 					collapsed = collapsed[:117] + "..."
-				result = f"[Template: {template.name.strip()}: {collapsed}]"
+				result = f"[Template: {name}: {collapsed}]"
 			return result
 
 		params = [f"{p.name}={p.value}" for p in template.params if p.name.strip()]
-		raise MissingTemplatePluginError(template.name.strip(), params)
-
-
+		raise MissingTemplatePluginError(name, params)
 # Global registry instance
 registry = TemplatePluginRegistry()

@@ -16,3 +16,6 @@ exclude_namespaces:            # namespaces to skip entirely
   - MediaWiki
   - User
 template_fallback: "error"     # error | codeblock
+#preprocess_rules:              # optional regex substitutions on raw wikitext
+#  - pattern: '\{\{(https?://[^\s}]+)(?:\s+([^}]*))?\}\}'
+#    replacement: '[$2]($1)'    # fix {{http://... text}} → [text](http://...)

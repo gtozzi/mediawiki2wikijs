@@ -4,6 +4,7 @@ import pytest
 
 from mw2wj.converter import _preprocess, _postprocess, LINK_PLACEHOLDER_RE, CATEGORY_RE
 from mw2wj.models import ConversionContext, Revision
+import mw2wj.template_plugins  # noqa: F401 — loads builtin plugins
 
 # Skip pandoc-dependent tests if pandoc is not installed
 try:
@@ -60,6 +61,110 @@ class TestPreprocess:
 		ctx = ConversionContext(template_fallback="error")
 		with pytest.raises(MissingTemplatePluginError):
 			_preprocess("{{NonExistentTemplate}}", ctx)
+
+	def test_commandline_plugin_simple(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Commandline|cmd=echo hello}}", ctx)
+		assert "```shell" in result
+		assert "$ echo hello" in result
+
+	def test_commandline_plugin_multiline(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess(
+			"{{Commandline|cmd=line1\nline2}}", ctx
+		)
+		assert "```shell" in result
+		assert "$ line1" in result
+		assert "$ line2" in result
+
+	def test_commandline_plugin_root_prompt(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess(
+			"{{Commandline|root=yes|cmd=mplayer -v -dvd-device /dev/dvd dvd://1 > info.txt}}",
+			ctx,
+		)
+		assert "```shell" in result
+		assert "# mplayer" in result
+		assert "root=yes" not in result
+
+	def test_commandline_plugin_root_no(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Commandline|root=no|cmd=ls}}", ctx)
+		assert "```shell" in result
+		assert "$ ls" in result
+
+	def test_commandline_plugin_empty_cmd(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Commandline|cmd=}}", ctx)
+		assert "```shell" in result
+
+	def test_filename_plugin(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Filename|test.txt}}", ctx)
+		assert "`test.txt`" in result
+
+	def test_filename_plugin_empty(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Filename}}", ctx)
+		assert "``" in result
+
+	def test_boxcode_plugin(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Box Code|swap setup|<nowiki>#/bin/sh\nmkswap /dev/sda</nowiki>}}", ctx)
+		assert "```text" in result
+		assert "# Code: swap setup" in result
+		assert "#/bin/sh" in result
+		assert "mkswap /dev/sda" in result
+		assert "<nowiki>" not in result
+
+	def test_boxcode_plugin_no_desc(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Box Code||echo hello}}", ctx)
+		assert "```text" in result
+		assert "echo hello" in result
+		assert "# Code:" not in result
+
+	def test_boxcode_plugin_empty(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Box Code}}", ctx)
+		assert result == ""
+
+	def test_cmd_plugin(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{cmd|mdadm --grow}}", ctx)
+		assert "`mdadm --grow`" in result
+
+	def test_cmd_plugin_empty(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{cmd}}", ctx)
+		assert "``" in result
+
+	def test_boxfile_plugin(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Box File|name=fstab|content=<nowiki>/dev/sda1 / ext4 defaults 0 1</nowiki>}}", ctx)
+		assert "```text" in result
+		assert "# File: fstab" in result
+		assert "/dev/sda1" in result
+		assert "<nowiki>" not in result
+
+	def test_boxfile_scroll_alias(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Box File Scroll|name=mdadm.conf|content=DEVICE /dev/sda}}", ctx)
+		assert "```text" in result
+		assert "# File: mdadm.conf" in result
+		assert "DEVICE /dev/sda" in result
+
+	def test_boxfile_plugin_empty(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{Box File|name=x|content=}}", ctx)
+		assert result == ""
+
+	def test_parser_function_stripped(self):
+		ctx = ConversionContext()
+		result, link_map = _preprocess("{{#if: {{NAMESPACE}}|<table>then</table>|{{{content}}}}}", ctx)
+		assert "#if" not in result
+		assert "<table>" not in result
+		assert result.strip() == ""
 
 
 class TestPostProcessing:

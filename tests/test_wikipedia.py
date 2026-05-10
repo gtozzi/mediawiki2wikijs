@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+import mw2wj.template_plugins  # noqa: F401 — loads builtin plugins
 from mw2wj.converter import convert_revision
 from mw2wj.models import ConversionContext
 from mw2wj.parser import parse_dump
@@ -71,6 +72,7 @@ class TestWikipediaParsing:
 			exclude_namespaces=[],
 		)
 		for page in dump.pages:
+			ctx.current_namespace = page.namespace
 			for rev in page.revisions:
 				md = convert_revision(rev, ctx)
 				assert md is not None
@@ -87,6 +89,7 @@ class TestWikipediaParsing:
 			template_fallback="codeblock",
 		)
 		for page in dump.pages:
+			ctx.current_namespace = page.namespace
 			for rev in page.revisions:
 				md = convert_revision(rev, ctx)
 				assert "[[Category:" not in md
@@ -105,6 +108,7 @@ class TestWikipediaParsing:
 			template_fallback="codeblock",
 		)
 		for page in dump.pages:
+			ctx.current_namespace = page.namespace
 			for rev in page.revisions:
 				md = convert_revision(rev, ctx)
 				# Real articles should produce substantial output

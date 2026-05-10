@@ -70,9 +70,13 @@ class ConversionContext:
 		exclude_namespaces: list[str] | None = None,
 		lowercase_paths: bool = False,
 		template_fallback: str = "error",
+		current_namespace: int = 0,
+		preprocess_rules: list[dict[str, str]] | None = None,
 	):
 		self.category_mode = category_mode
 		self.namespace_separator = namespace_separator
 		self.exclude_namespaces = exclude_namespaces or []
 		self.lowercase_paths = lowercase_paths
 		self.template_fallback = template_fallback
+		self.current_namespace = current_namespace
+		self.preprocess_rules = preprocess_rules or []

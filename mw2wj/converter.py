@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import mwparserfromhell
 import pypandoc
 
+from mw2wj.template_plugins.base import MissingTemplatePluginError
 from mw2wj.template_plugins.registry import registry
 
 if TYPE_CHECKING:
@@ -31,6 +32,24 @@ def convert_revision(rev: Revision, context: ConversionContext) -> str:
 	return text
 
 
+def _apply_preprocess_rules(text: str, context: ConversionContext) -> str:
+	"""Apply user-configured regex substitutions to raw wikitext.
+
+	Each rule in context.preprocess_rules is a dict with 'pattern' and
+	'replacement' keys.  Patterns are applied in order, each against the
+	result of the previous substitution.
+	"""
+	for rule in context.preprocess_rules:
+		try:
+			text = re.sub(rule["pattern"], rule["replacement"], text)
+		except re.error as e:
+			logger.warning(
+				"Invalid preprocess rule pattern '%s': %s",
+				rule.get("pattern", ""), e,
+			)
+	return text
+
+
 def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, str]]:
 	"""Apply pre-processing before pandoc conversion.
 
@@ -38,6 +57,12 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 	to their final Markdown link strings.
 	"""
 	link_map: dict[str, str] = {}
+
+
+	# Apply configurable pre-processing regex rules before
+	# any wikitext parsing.  Useful for fixing wiki-specific
+	# broken syntax (e.g. mistyped link brackets).
+	text = _apply_preprocess_rules(text, context)
 
 	# Handle #REDIRECT
 	if text.strip().lower().startswith("#redirect"):
@@ -100,13 +125,44 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 		except ValueError:
 			logger.warning("Could not replace wikilink '%s' in-place", title)
 
-	# Process templates through plugin registry
+	# Process templates through plugin registry.
+	# Parser functions (#if, #ifeq, #switch, etc.) are stripped from
+	# regular pages but preserved in template namespace (ns=10) where
+	# they define the template's structure and logic.
+	# Magic words (NAMESPACE, PAGENAME, !, etc.) are MediaWiki
+	# built-in variables — strip them everywhere since we cannot
+	# expand them meaningfully and pandoc does not understand them.
+	MAGIC_WORD_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 	for template in wikicode.filter_templates():
-		replacement = registry.convert(template, context)
+		name = template.name.strip()
+		if name.startswith("#") or MAGIC_WORD_RE.match(name):
+			if context.current_namespace == 10 and name.startswith("#"):
+				# Parser functions in template namespace
+				# contain structural HTML — leave them
+				# for pandoc to handle natively.
+				continue
+			replacement = ""
+			try:
+				wikicode.replace(template, replacement)
+			except ValueError:
+				pass
+			continue
+		try:
+			replacement = registry.convert(template, context)
+		except MissingTemplatePluginError:
+			# Template has no plugin and fallback is 'error'.
+			# Try to strip it.  If it is nested inside another
+			# template, replace() will fail — skip, the parent
+			# or final regex pass will clean it up.
+			try:
+				wikicode.replace(template, '')
+			except ValueError:
+				continue
+			raise
 		try:
 			wikicode.replace(template, replacement)
 		except ValueError:
-			logger.warning("Could not replace template '%s' in-place", template.name.strip())
+			logger.warning("Could not replace template '%s' in-place", name)
 
 	text = str(wikicode)
 
@@ -148,7 +204,7 @@ def _pandoc_convert(text: str) -> str:
 	try:
 		pandoc_path = pypandoc.get_pandoc_path()
 		pandoc_version = pypandoc.get_pandoc_version()
-		logger.info("Using pandoc %s at %s", pandoc_version, pandoc_path)
+		logger.debug("Using pandoc %s at %s", pandoc_version, pandoc_path)
 	except OSError:
 		raise RuntimeError(
 			"Pandoc is not installed. Install it with: apt install pandoc"
