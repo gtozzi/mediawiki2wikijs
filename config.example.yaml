@@ -1,0 +1,18 @@
+# WikiJS connection
+wiki_url: "https://wiki.example.com"
+api_token: ""
+
+# Input
+input_xml: "dump.xml"
+
+# Migration behavior
+dry_run: false
+no_redirects: false
+lowercase_paths: false
+category_mode: "tag"           # tag | text | both | discard
+namespace_separator: "/"       # how to map MediaWiki : to path separator
+exclude_namespaces:            # namespaces to skip entirely
+  - Special
+  - MediaWiki
+  - User
+template_fallback: "error"     # error | codeblock

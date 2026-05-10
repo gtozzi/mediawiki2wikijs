@@ -1,0 +1,23 @@
+# User config (contains tokens)
+config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Virtual env
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Pandoc download cache
+*.deb
+
+# Test config files
+tests/*_config.yaml

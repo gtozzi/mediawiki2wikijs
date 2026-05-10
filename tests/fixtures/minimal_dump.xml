@@ -1,0 +1,83 @@
+<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:schemaLocation="http://www.mediawiki.org/xml/export-0.11/
+           http://www.mediawiki.org/xml/export-0.11.xsd"
+           version="0.11" xml:lang="en">
+  <siteinfo>
+    <sitename>TestWiki</sitename>
+    <base>http://testwiki.example.com/wiki/Main_Page</base>
+    <generator>MediaWiki 1.43</generator>
+    <case>first-letter</case>
+    <namespaces>
+      <namespace key="0" case="first-letter" />
+      <namespace key="1" case="first-letter">Talk</namespace>
+      <namespace key="2" case="first-letter">User</namespace>
+      <namespace key="6" case="first-letter">File</namespace>
+      <namespace key="10" case="first-letter">Template</namespace>
+      <namespace key="14" case="first-letter">Category</namespace>
+    </namespaces>
+  </siteinfo>
+
+  <page>
+    <title>TestPage</title>
+    <ns>0</ns>
+    <id>1</id>
+    <revision>
+      <id>1</id>
+      <parentid>0</parentid>
+      <timestamp>2024-01-01T12:00:00Z</timestamp>
+      <contributor>
+        <username>Alice</username>
+        <id>1</id>
+      </contributor>
+      <comment>Initial revision</comment>
+      <model>wikitext</model>
+      <format>text/x-wiki</format>
+      <text xml:space="preserve" bytes="86">'''TestPage''' is a test page.
+
+It has [[Internal Link|links]] and some text.</text>
+      <sha1>abc123abc123abc123abc123abc123abc123abc1</sha1>
+    </revision>
+    <revision>
+      <id>2</id>
+      <parentid>1</parentid>
+      <timestamp>2024-01-02T15:30:00Z</timestamp>
+      <contributor>
+        <username>Bob</username>
+        <id>2</id>
+      </contributor>
+      <minor/>
+      <comment>Added see also section</comment>
+      <model>wikitext</model>
+      <format>text/x-wiki</format>
+      <text xml:space="preserve" bytes="164">'''TestPage''' is a test page.
+
+It has [[Internal Link|links]] and some text.
+
+== See also ==
+* [[Other Page]]
+* [[Another Page]]
+
+[[Category:Test Category]]</text>
+      <sha1>def456def456def456def456def456def456def4</sha1>
+    </revision>
+  </page>
+
+  <page>
+    <title>Template:Infobox</title>
+    <ns>10</ns>
+    <id>2</id>
+    <revision>
+      <id>3</id>
+      <timestamp>2024-01-03T10:00:00Z</timestamp>
+      <contributor>
+        <ip>192.168.1.1</ip>
+      </contributor>
+      <comment>Created template</comment>
+      <model>wikitext</model>
+      <format>text/x-wiki</format>
+      <text xml:space="preserve" bytes="45">{{{name}}} is a {{{type}}} located in {{{location}}}.</text>
+      <sha1>ghi789ghi789ghi789ghi789ghi789ghi789ghi7</sha1>
+    </revision>
+  </page>
+</mediawiki>
