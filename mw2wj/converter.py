@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 from typing import TYPE_CHECKING
 
 import mwparserfromhell
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-LINK_PLACEHOLDER_RE = re.compile(r"MWLINKPLACEHOLDER(\d+)END")
+LINK_PLACEHOLDER_RE = re.compile(r"MWLINKPLACEHOLDER(\d+)")
 
 # Category link: [[Category:Name]] or [[Category:Name|sort]]
 CATEGORY_RE = re.compile(r"\[\[[Cc]ategory:([^\]|]+)(?:[^\]|]*)?\]\]")
@@ -107,28 +108,72 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 		except ValueError:
 			logger.warning("Could not replace template '%s' in-place", template.name.strip())
 
-	return str(wikicode), link_map
+	text = str(wikicode)
+
+	# Strip <ref> tags — references don't translate well to Markdown and
+	# broken ref tags (from template stripping) crash pandoc.
+	text = re.sub(r"<ref[^>]*/?>", "", text, flags=re.IGNORECASE)
+	text = re.sub(r"</ref>", "", text, flags=re.IGNORECASE)
+
+	# Fix orphaned quoted attributes in table cells (e.g.
+	# |style="val" "width: 20px;" |1). Wikipedia's parser tolerates
+	# these but pandoc's mediawiki reader does not.
+	text = re.sub(r'(="[^"]*")\s+"[^"]+"', r'\1', text)
+
+	# Regex pass: strip any remaining {{templates}} that mwparserfromhell
+	# could not replace (e.g. templates nested inside <ref> tags).
+	# Apply iteratively to handle single-level nesting.
+	TEMPLATE_RE = re.compile(r"\{\{[^{}]*\}\}")
+	prev = None
+	while prev != text:
+		prev = text
+		text = TEMPLATE_RE.sub("", text)
+
+	return text, link_map
+
+
+# Maximum wall-clock seconds allowed for a single pandoc invocation.
+# Large/complex wikitext pages can trigger exponential-time behaviour in
+# pandoc's mediawiki reader. This cap prevents tests from hanging forever.
+PANDOC_TIMEOUT = 120
 
 
 def _pandoc_convert(text: str) -> str:
-	"""Convert MediaWiki wikitext to Markdown using pandoc."""
+	"""Convert MediaWiki wikitext to Markdown using pandoc.
+
+	@param text: Raw MediaWiki wikitext
+	@returns: Markdown output from pandoc
+	@raises RuntimeError: If pandoc is not installed or times out
+	"""
 	try:
+		pandoc_path = pypandoc.get_pandoc_path()
 		pandoc_version = pypandoc.get_pandoc_version()
-		logger.info("Using pandoc %s", pandoc_version)
+		logger.info("Using pandoc %s at %s", pandoc_version, pandoc_path)
 	except OSError:
 		raise RuntimeError(
 			"Pandoc is not installed. Install it with: apt install pandoc"
 		)
 
-	return pypandoc.convert_text(
-		text,
-		"markdown_strict",
-		format="mediawiki",
-		extra_args=[
+	result = subprocess.run(
+		[
+			pandoc_path,
+			"--from=mediawiki",
+			"--to=markdown_strict",
 			"--wrap=none",
 			"--markdown-headings=atx",
 		],
+		input=text,
+		capture_output=True,
+		text=True,
+		timeout=PANDOC_TIMEOUT,
 	)
+
+	if result.returncode != 0:
+		raise RuntimeError(
+			f"Pandoc exited with code {result.returncode}: {result.stderr[:500]}"
+		)
+
+	return result.stdout
 
 
 def _postprocess(text: str, rev: Revision, context: ConversionContext, link_map: dict[str, str]) -> str:
@@ -136,12 +181,24 @@ def _postprocess(text: str, rev: Revision, context: ConversionContext, link_map:
 	# Remove trailing whitespace on each line
 	text = "\n".join(line.rstrip() for line in text.split("\n"))
 
-	# Replace link placeholders with actual Markdown links
+	# Replace link placeholders with actual Markdown links.
+	# Normally placeholders end with END, but tolerates the rare case
+	# where END gets stripped by downstream processing.
 	def _restore_link(match: re.Match) -> str:
-		key = f"MWLINKPLACEHOLDER{match.group(1)}END"
-		return link_map.get(key, match.group(0))
+		digits = match.group(1)
+		key = f"MWLINKPLACEHOLDER{digits}END"
+		if key in link_map:
+			return link_map[key]
+		key = f"MWLINKPLACEHOLDER{digits}"
+		if key in link_map:
+			return link_map[key]
+		return match.group(0)
 
 	text = LINK_PLACEHOLDER_RE.sub(_restore_link, text)
+
+	# Safety net: strip any remaining placeholder artifacts that survived
+	# pandoc mangling (rare — happens with adjacent formatting markers).
+	text = re.sub(r"MWLINKPLACEHOLDER\S+", "", text)
 
 	# Remove any remaining category links that pandoc may have preserved
 	text = CATEGORY_RE.sub("", text)

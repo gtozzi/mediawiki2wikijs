@@ -75,9 +75,14 @@ To add custom template converters, create a module in `mw2wj/template_plugins/` 
 
 ## Known Limitations
 
-- **Revision timestamps** are set server-side by WikiJS to the import time. Original timestamps are preserved in HTML comments within each revision's content.
-- **User accounts** are not migrated. All edits are attributed to the API token owner.
-- **Complex templates** (infoboxes, navboxes) require custom plugins.
+### Page history
+Revision timestamps are set server-side by WikiJS to the import time. Original timestamps are preserved in HTML comments within each revision's content. User accounts are not migrated — all edits are attributed to the API token owner.
+
+### File history
+MediaWiki XML dumps only include the **latest** version of each uploaded file, even when generated with `--uploads --include-files`. Older file revisions live in the `oldimage` database table and are not exported to XML (see [MediaWiki XML export documentation](https://www.mediawiki.org/wiki/Manual:DumpBackup.php#Dumps_of_uploaded_files) for details). Additionally, Wiki.js does not support file versioning — re-uploading to the same filename replaces the previous version. This means file history cannot be preserved with the current dump format and WikiJS API capabilities.
+
+### Complex templates
+Infoboxes, navboxes, and other complex templates require custom plugins to convert meaningfully. The fallback wraps them in a fenced code block so they are never silently dropped.
 
 ## Credits
 

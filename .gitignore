@@ -21,3 +21,6 @@ venv/
 
 # Test config files
 tests/*_config.yaml
+
+# Wikipedia export fixtures (downloaded on demand, not redistributed)
+tests/fixtures/wikipedia_*.xml

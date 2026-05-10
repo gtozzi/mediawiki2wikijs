@@ -52,8 +52,8 @@ class TestPreprocess:
 	def test_template_codeblock_fallback(self):
 		ctx = ConversionContext(template_fallback="codeblock")
 		result, link_map = _preprocess("{{UnknownTemplate|param=value}}", ctx)
-		assert "```mediawiki" in result
 		assert "UnknownTemplate" in result
+		assert "[Template:" in result
 
 	def test_template_error_fallback(self):
 		from mw2wj.template_plugins.base import MissingTemplatePluginError

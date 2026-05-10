@@ -25,8 +25,17 @@ class TemplatePluginRegistry:
 			return plugin.convert(template, context)
 
 		if context.template_fallback == "codeblock":
-			# Generic fallback: wrap the raw template invocation in a code fence
-			return f"```mediawiki\n{str(template)}\n```"
+			params = [str(p.value).strip() for p in template.params if p.name.strip()]
+			summary = ", ".join(params[:3])
+			if len(params) > 3:
+				summary += ", ..."
+			result = f"[Template: {template.name.strip()}]"
+			if summary:
+				collapsed = " ".join(summary.split())
+				if len(collapsed) > 120:
+					collapsed = collapsed[:117] + "..."
+				result = f"[Template: {template.name.strip()}: {collapsed}]"
+			return result
 
 		params = [f"{p.name}={p.value}" for p in template.params if p.name.strip()]
 		raise MissingTemplatePluginError(template.name.strip(), params)
