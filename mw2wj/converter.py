@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-LINK_PLACEHOLDER_RE = re.compile(r"MWLINKPLACEHOLDER(\d+)")
+LINK_PLACEHOLDER_RE = re.compile(r"MWLINKPLACEHOLDER(\d+)(?:END)?")
 
 # Category link: [[Category:Name]] or [[Category:Name|sort]]
 CATEGORY_RE = re.compile(r"\[\[[Cc]ategory:([^\]|]+)(?:[^\]|]*)?\]\]")

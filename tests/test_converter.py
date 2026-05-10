@@ -70,6 +70,29 @@ class TestPostProcessing:
 		assert "[links](/Test)" in result
 		assert "MWLINKPLACEHOLDER0END" not in result
 
+	def test_placeholder_end_suffix_consumed(self):
+		"""The END suffix of MWLINKPLACEHOLDER{n}END must be consumed."""
+		rev = make_rev("Hello")
+		link_map = {"MWLINKPLACEHOLDER0END": "[Link](/Page)"}
+		result = _postprocess("See MWLINKPLACEHOLDER0END.", rev, ConversionContext(), link_map)
+		assert "END" not in result, f"END suffix leaked: {repr(result)}"
+		assert "[Link](/Page)" in result
+
+	def test_placeholder_end_suffix_multiple(self):
+		"""Multiple placeholders each have END consumed."""
+		rev = make_rev("Hello")
+		link_map = {
+			"MWLINKPLACEHOLDER0END": "[A](/A)",
+			"MWLINKPLACEHOLDER1END": "[B](/B)",
+		}
+		result = _postprocess(
+			"X MWLINKPLACEHOLDER0END Y MWLINKPLACEHOLDER1END Z",
+			rev, ConversionContext(), link_map,
+		)
+		assert "END" not in result
+		assert "[A](/A)" in result
+		assert "[B](/B)" in result
+
 	def test_metadata_html_comment(self):
 		rev = make_rev("Hello", author="Alice", comment="Fixed typo")
 		result = _postprocess("Hello", rev, ConversionContext(), {})
