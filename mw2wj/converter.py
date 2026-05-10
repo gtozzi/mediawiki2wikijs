@@ -26,7 +26,28 @@ def convert_revision(rev: Revision, context: ConversionContext) -> str:
 	"""Convert a single revision's wikitext to Markdown and store the result."""
 	text = rev.text
 	text, link_map = _preprocess(text, context)
-	text = _pandoc_convert(text)
+	try:
+		text = _pandoc_convert(text)
+	except RuntimeError as e:
+		import tempfile
+		# Dump both original and preprocessed text so the user
+		# can compare them to identify the source of corruption.
+		raw_path = tempfile.mktemp(
+			suffix=".mw", prefix=f"mw2w_raw_{rev.id}_",
+		)
+		pp_path = tempfile.mktemp(
+			suffix=".mw", prefix=f"mw2w_preprocessed_{rev.id}_",
+		)
+		try:
+			with open(raw_path, "w") as f:
+				f.write(rev.text)
+			with open(pp_path, "w") as f:
+				f.write(text)
+		except OSError:
+			pass
+		raise RuntimeError(
+			f"{e}\nRaw dump: {raw_path}\nPreprocessed: {pp_path}"
+		) from e
 	text = _postprocess(text, rev, context, link_map)
 	rev.markdown = text
 	return text
@@ -188,6 +209,91 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 	return text, link_map
 
 
+def _format_pandoc_error(text: str, result: subprocess.CompletedProcess, trace_stderr: str = "") -> str:
+	"""Build a pandoc error message with surrounding context lines."""
+	stderr = result.stderr
+	error_msg = stderr.strip().split("\n")[-1] if stderr.strip() else "unknown error"
+	msg = f"Pandoc exited with code {result.returncode}: {error_msg}"
+
+	# Pandoc reports errors as "Error at (line N, column M):"
+	m = re.search(r"line\s+(\d+)", stderr)
+	if m:
+		err_line = int(m.group(1))
+		lines = text.split("\n")
+		if err_line > len(lines):
+			start = max(0, len(lines) - 10)
+			end = len(lines)
+			msg += f"\n\nEnd of file (line {err_line} is past EOF, "
+			msg += f"showing last {end - start} of {len(lines)} lines):\n"
+		else:
+			start = max(0, err_line - 4)
+			end = min(len(lines), err_line + 3)
+			msg += "\n\nContext (line numbers are 1-based):\n"
+		for i in range(start, end):
+			marker = ">>>" if i == err_line - 1 else "   "
+			msg += f"  {marker} {i+1:5d} | {lines[i][:200]}\n"
+
+	# Show the last few trace lines from a second --trace run.
+	# These reveal what pandoc last parsed successfully before
+	# the error (useful for identifying unclosed blocks).
+	trace_lines = [l for l in trace_stderr.split("\n") if l.startswith("[trace]")]
+	if trace_lines:
+		msg += "\nLast parsed elements (--trace):\n"
+		for tl in trace_lines[-5:]:
+			msg += f"  {tl[:250]}\n"
+
+	# Scan for unmatched block openers — the most common cause
+	# of "unexpected end of input" in pandoc's mediawiki reader.
+	unclosed = _find_unclosed_blocks(text)
+	if unclosed:
+		msg += "\nUnclosed blocks (missing closer):\n"
+		for line_no, block_type, opener in unclosed[:8]:
+			msg += f"  line {line_no}: {block_type} — {opener[:120]}\n"
+
+	return msg
+
+
+def _find_unclosed_blocks(text: str) -> list[tuple[int, str, str]]:
+	"""Find unclosed MediaWiki blocks that would cause pandoc parse errors."""
+	results: list[tuple[int, str, str]] = []
+	lines = text.split("\n")
+
+	# Table: {| opens, |} closes — simple stack-based scan.
+	# Also collect all positions so errors show the full picture.
+	table_stack: list[tuple[int, str]] = []
+	all_opens: list[int] = []
+	all_closes: list[int] = []
+	for i, line in enumerate(lines, 1):
+		stripped = line.strip()
+		if stripped.startswith("{|"):
+			all_opens.append(i)
+			# MediaWiki tables cannot nest — a {| inside an
+			# already-open table is just cell content.
+			if not table_stack:
+				table_stack.append((i, stripped))
+		elif stripped.startswith("|}"):
+			all_closes.append(i)
+			if table_stack:
+				table_stack.pop()
+	for line_no, opener in table_stack:
+		results.append((
+			line_no, "table",
+			f"{opener}  (all {{|}}: {all_opens}, all |{{}}: {all_closes})",
+		))
+
+	# HTML tags that wrap blocks
+	for tag in ("div", "pre", "blockquote", "source", "code"):
+		opens = len(re.findall(rf"<{tag}\b", text, re.IGNORECASE))
+		closes = len(re.findall(rf"</{tag}>", text, re.IGNORECASE))
+		if opens > closes:
+			# Find the first unmatched open line
+			for i, line in enumerate(lines, 1):
+				if re.search(rf"<{tag}\b", line, re.IGNORECASE):
+					results.append((i, f"<{tag}>", line.strip()))
+					break
+
+	return results
+
 # Maximum wall-clock seconds allowed for a single pandoc invocation.
 # Large/complex wikitext pages can trigger exponential-time behaviour in
 # pandoc's mediawiki reader. This cap prevents tests from hanging forever.
@@ -225,9 +331,27 @@ def _pandoc_convert(text: str) -> str:
 	)
 
 	if result.returncode != 0:
-		raise RuntimeError(
-			f"Pandoc exited with code {result.returncode}: {result.stderr[:500]}"
-		)
+		trace_stderr = ""
+		try:
+			trace_args = [
+				pandoc_path,
+				"--from=mediawiki",
+				"--to=markdown_strict",
+				"--wrap=none",
+				"--markdown-headings=atx",
+				"--trace",
+			]
+			trace_result = subprocess.run(
+				trace_args,
+				input=text,
+				capture_output=True,
+				text=True,
+				timeout=PANDOC_TIMEOUT,
+			)
+			trace_stderr = trace_result.stderr
+		except Exception:
+			pass
+		raise RuntimeError(_format_pandoc_error(text, result, trace_stderr))
 
 	return result.stdout
 

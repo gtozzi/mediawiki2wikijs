@@ -81,6 +81,15 @@ Revision timestamps are set server-side by WikiJS to the import time. Original t
 ### File history
 MediaWiki XML dumps only include the **latest** version of each uploaded file, even when generated with `--uploads --include-files`. Older file revisions live in the `oldimage` database table and are not exported to XML (see [MediaWiki XML export documentation](https://www.mediawiki.org/wiki/Manual:DumpBackup.php#Dumps_of_uploaded_files) for details). Additionally, Wiki.js does not support file versioning — re-uploading to the same filename replaces the previous version. This means file history cannot be preserved with the current dump format and WikiJS API capabilities.
 
+### XML export corruption (table closer)
+Some versions of MediaWiki's `dumpBackup.php` corrupt `|}` (table closer) to `|)`. This causes pandoc to fail with "unexpected end of input" on affected pages. Fix with a `preprocess_rules` entry in your config:
+
+```yaml
+preprocess_rules:
+  - pattern: '(?m)^\|\)\s*$'
+    replacement: '|}'
+```
+
 ### Complex templates
 Infoboxes, navboxes, and other complex templates require custom plugins to convert meaningfully. The fallback wraps them in a fenced code block so they are never silently dropped.
 
