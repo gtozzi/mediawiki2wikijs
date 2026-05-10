@@ -74,3 +74,55 @@ guard in `_pandoc_convert()` as a safety net.
 
 The parametrized tests in `test_wikipedia.py` automatically pick up
 any new fixtures that appear in the `fixtures/` directory.
+
+## Future: full end-to-end testing
+
+A live E2E test that spins up MediaWiki, creates test content, exports
+a dump, imports it into Wiki.js, and verifies the result would cover the
+two currently untested modules (`importer.py` and `wikijs_client.py`).
+Research findings (2026-05):
+
+### MediaWiki side — solved
+
+MediaWiki can run entirely via PHP's built-in development server with
+SQLite as the database. No Apache, no MySQL needed:
+
+```bash
+git clone https://gerrit.wikimedia.org/r/mediawiki/core.git mediawiki
+composer mw-install:sqlite   # one-command bootstrap: DB + admin account
+composer serve                # PHP dev server on :4000
+```
+
+Pages can be created via the MediaWiki API (bot passwords), and dumps
+can be generated with `php dumpBackup.php`. Fully scriptable, ~30 seconds.
+
+### Wiki.js side — the bottleneck
+
+Wiki.js 2.x (current stable) has **no headless bootstrap**. The setup
+wizard is a mandatory web UI step — there is no `config.yml` option, env
+var, or CLI flag to create the initial admin account.
+
+Wiki.js 3.x (alpha) adds `ADMIN_EMAIL` and `ADMIN_PASS` env vars for
+headless setup, but **drops SQLite support** (PostgreSQL only) and is
+not yet production-stable.
+
+### Possible paths forward
+
+| Approach | Database | Headless? | Risk |
+|---|---|---|---|
+| Wiki.js 2.x + reverse-engineer the setup wizard's GraphQL calls | SQLite | Scripted | Medium — fragile across versions |
+| Wiki.js 2.x + direct DB insertion of admin user | SQLite | Scripted | Medium — schema may change |
+| Wiki.js 3.x alpha | PostgreSQL | Native env vars | High — alpha software |
+| Mock Wiki.js HTTP layer | None | Trivially | Low — not a true E2E |
+
+The most promising approach is scripting the Wiki.js 2.x setup wizard:
+it is a Vue.js app making GraphQL mutations that could be replicated in
+Python. Once the admin account exists, the rest is standard API calls.
+
+### When to revisit
+
+- When Wiki.js 3.x reaches stable (headless setup + check if SQLite
+  support is reconsidered).
+- When the importer/client modules grow in complexity and mock-only
+  coverage feels insufficient.
+- When setting up a CI pipeline that warrants the infrastructure work.

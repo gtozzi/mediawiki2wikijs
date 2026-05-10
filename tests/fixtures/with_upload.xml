@@ -28,7 +28,9 @@
       <ns0:comment>Initial</ns0:comment>
       <ns0:model>wikitext</ns0:model>
       <ns0:format>text/x-wiki</ns0:format>
-      <ns0:text xml:space="preserve" bytes="6">Hello!</ns0:text>
+      <ns0:text xml:space="preserve" bytes="77">[[File:TestImage.png|thumb|A test caption]]
+
+Some text after the image.</ns0:text>
       <ns0:sha1>abc123abc123abc123abc123abc123abc123abc123</ns0:sha1>
     </ns0:revision>
   </ns0:page>

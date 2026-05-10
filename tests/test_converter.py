@@ -110,3 +110,69 @@ class TestPostProcessing:
 		result = CATEGORY_RE.sub("", "Text [[Category:Foo]] more")
 		assert "[[Category:Foo]]" not in result
 		assert "Text  more" in result
+
+@pytest.mark.skipif(not HAS_PANDOC, reason="pandoc not installed")
+class TestImageHandling:
+	"""Verify image/file wikilinks convert without breaking and connect to uploads."""
+
+	def test_uploaded_file_is_parsed(self):
+		from mw2wj.parser import parse_dump
+		dump = parse_dump("tests/fixtures/with_upload.xml")
+		assert len(dump.files) == 1
+		assert dump.files[0].filename == "TestImage.png"
+		assert len(dump.files[0].contents) == 70
+		assert dump.files[0].sha1 == "up1up1up1up1up1up1up1up1up1up1"
+
+	def test_file_wikilink_does_not_crash(self):
+		"""[[File:...]] links must not cause pandoc errors."""
+		from mw2wj.converter import convert_revision
+		from mw2wj.parser import parse_dump
+		dump = parse_dump("tests/fixtures/with_upload.xml")
+		ctx = ConversionContext(template_fallback="codeblock")
+		for page in dump.pages:
+			for rev in page.revisions:
+				md = convert_revision(rev, ctx)
+				assert md is not None
+				assert len(md) > 50
+
+	def test_file_wikilink_produces_img_tag(self):
+		"""[[File:name.png]] must become an <img> tag in output."""
+		from mw2wj.converter import convert_revision
+		from mw2wj.parser import parse_dump
+		dump = parse_dump("tests/fixtures/with_upload.xml")
+		ctx = ConversionContext(template_fallback="codeblock")
+		for page in dump.pages:
+			for rev in page.revisions:
+				md = convert_revision(rev, ctx)
+				assert "<img" in md, f"No <img> tag in output: {repr(md[:300])}"
+				assert "TestImage.png" in md, (
+					f"Filename not found in output: {repr(md[:300])}"
+				)
+
+	def test_file_wikilink_with_caption(self):
+		"""[[File:name.png|thumb|caption]] produces <figure> with <figcaption>."""
+		from mw2wj.converter import convert_revision
+		from mw2wj.parser import parse_dump
+		dump = parse_dump("tests/fixtures/with_upload.xml")
+		ctx = ConversionContext(template_fallback="codeblock")
+		for page in dump.pages:
+			for rev in page.revisions:
+				md = convert_revision(rev, ctx)
+				assert "<figure>" in md, f"No <figure> in output"
+				assert "<figcaption>" in md, f"No <figcaption> in output"
+				assert "A test caption" in md, f"Caption not in output"
+
+	def test_upload_filename_matches_img_src(self):
+		"""The <img src> filename must match UploadedFile.filename from the dump."""
+		from mw2wj.converter import convert_revision
+		from mw2wj.parser import parse_dump
+		dump = parse_dump("tests/fixtures/with_upload.xml")
+		ctx = ConversionContext(template_fallback="codeblock")
+		for uploaded_file in dump.files:
+			filename = uploaded_file.filename
+			for page in dump.pages:
+				for rev in page.revisions:
+					md = convert_revision(rev, ctx)
+					assert filename in md, (
+						f"Uploaded file '{filename}' not referenced in output"
+					)
