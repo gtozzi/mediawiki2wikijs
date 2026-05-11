@@ -68,6 +68,13 @@ def parse_dump(filepath: str) -> DumpInfo:
 		if page is not None:
 			pages.append(page)
 
+		# <upload> elements are nested inside file-namespace <page> elements
+		for upload_elem in page_elem.findall(_tag("upload")):
+			uf = _parse_upload(upload_elem)
+			if uf is not None:
+				files.append(uf)
+
+	# Older dump formats may place <upload> directly under the root
 	for file_elem in root.findall(_tag("upload")):
 		uf = _parse_upload(file_elem)
 		if uf is not None:
@@ -177,7 +184,7 @@ def _parse_upload(file_elem: ET.Element) -> UploadedFile | None:
 		contributor = "Unknown"
 
 	size_str = _require_text(file_elem, "size", f"upload '{filename}'")
-	sha1_text = _require_text(file_elem, "sha1", f"upload '{filename}'")
+	sha1_text = _find_text(file_elem, "sha1") or ""
 
 	contents_elem = file_elem.find(_tag("contents"))
 	if contents_elem is None or contents_elem.text is None:

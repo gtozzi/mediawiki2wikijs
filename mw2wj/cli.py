@@ -28,7 +28,7 @@ def load_config(path: str) -> dict:
 	return config
 
 
-def run(config_path: str, dry_run: bool = False, log_level: int = logging.INFO, skip_failed: bool = False) -> None:
+def run(config_path: str, dry_run: bool = False, log_level: int = logging.INFO, skip_failed: bool = False, prune: bool = False, force: bool = False) -> None:
 	config = load_config(config_path)
 
 	if dry_run:
@@ -60,19 +60,24 @@ def run(config_path: str, dry_run: bool = False, log_level: int = logging.INFO, 
 		lowercase_paths=config.get("lowercase_paths", False),
 		template_fallback=config.get("template_fallback", "error"),
 		preprocess_rules=config.get("preprocess_rules", []),
+		locale=config.get("locale", "en"),
+		include_metadata=config.get("include_metadata", True),
+		file_upload_dir=config.get("file_upload_dir", "import_mw"),
+		include_edit_description=config.get("include_edit_description", True),
 	)
 
 	total_revisions = sum(len(p.revisions) for p in dump.pages)
 	logger.info("Phase 2: Converting %d pages (%d revisions total)", len(dump.pages), total_revisions)
 
 	for page in dump.pages:
-		# Template namespace pages contain definition logic
-		# (parser functions, {{{param}}} syntax) that pandoc
-		# cannot parse — skip them.
-		if page.namespace == 10:
-			logger.debug("Skipping template page '%s'", page.title)
+		# Skip pages in excluded namespaces — they are listed
+		# in the config and will also be filtered at import time.
+		# Skipping them here avoids needless pandoc conversion.
+		if page.namespace_name in ctx.exclude_namespaces:
+			logger.debug("Skipping %s page '%s'", page.namespace_name, page.title)
 			continue
 		ctx.current_namespace = page.namespace
+		ctx.collected_categories.clear()
 		for rev in page.revisions:
 			try:
 				convert_revision(rev, ctx)
@@ -84,6 +89,7 @@ def run(config_path: str, dry_run: bool = False, log_level: int = logging.INFO, 
 				if skip_failed:
 					continue
 				raise
+		page.categories = list(ctx.collected_categories)
 	logger.info("Conversion complete")
 
 	if dry_run_mode:
@@ -100,16 +106,124 @@ def run(config_path: str, dry_run: bool = False, log_level: int = logging.INFO, 
 	if not config.get("api_token"):
 		raise ValueError("API token is required for import — set 'api_token' in config")
 
+	if prune:
+		_prune_existing_pages(client, force)
+
 	stats = ImportStats()
 
 	if dump.files:
 		logger.info("Phase 3a: Uploading %d files", len(dump.files))
-		import_files(client, dump.files, stats)
+		import_files(client, dump.files, stats, upload_dir=config.get("file_upload_dir", "import_mw"), skip_failed=skip_failed, lowercase_paths=config.get("lowercase_paths", False))
 
 	logger.info("Phase 3b: Importing %d pages", len(dump.pages))
-	import_pages(client, dump.pages, ctx, stats)
+	is_private = config.get("is_private", True)
+	locale = config.get("locale", "en")
+	import_pages(client, dump.pages, ctx, stats, skip_failed=skip_failed, is_private=is_private, locale=locale)
 
 	stats.log_summary()
+
+	# If home_page is configured, rename that page to "home"
+	# so it becomes the wiki landing page.
+	home_page = config.get("home_page")
+	if home_page:
+		_set_home_page(client, home_page, config.get("locale", "en"), config["wiki_url"])
+
+
+def _set_home_page(client: WikiJSClient, page_path: str, locale: str, wiki_url: str) -> None:
+	"""Rename a page to 'home' so it becomes the wiki landing page.
+
+	Wiki.js determines the home page by convention: the page at path
+	"home" is served at the root URL.  This operation finds the
+	specified page, fetches its full content, and re-creates it at
+	path "home" via the pages.update mutation.
+
+	@param client: Authenticated WikiJSClient
+	@param page_path: The sanitized page path (without locale prefix)
+	@param locale: Locale code (e.g. "it", "en")
+	@param wiki_url: Wiki.js base URL (for the final log message)
+	"""
+	# The source path in Wiki.js includes the locale prefix
+	source_path = f"{locale}/{page_path}"
+
+	logger.info("Looking for page with path '%s'", source_path)
+	pages = client.list_pages()
+	match = None
+	for p in pages:
+		if p.get("path") == source_path:
+			match = p
+			break
+
+	if not match:
+		# Try without locale prefix
+		for p in pages:
+			if p.get("path") == page_path:
+				match = p
+				break
+
+	if not match:
+		logger.error(
+			"Page with path '%s' not found. Available paths: %s",
+			source_path,
+			", ".join(p.get("path", "?") for p in pages[:20]),
+		)
+		sys.exit(1)
+
+	# Fetch full page data so we can re-submit content via update_page
+	page_data = client.get_page(match["id"])
+	target_path = "home"
+	logger.info(
+		"Moving page '%s' (id=%d) from '%s' to '%s'",
+		page_data.get("title"), page_data["id"], page_data.get("path"), target_path,
+	)
+	# Extract tag strings from PageTag objects ({id, tag})
+	raw_tags = page_data.get("tags", [])
+	tag_names = [t["tag"] for t in raw_tags] if raw_tags else []
+	client.update_page(
+		page_data["id"],
+		target_path,
+		page_data.get("content", ""),
+		page_data.get("title", ""),
+		description="Set as home page",
+		is_private=page_data.get("isPrivate", True),
+		locale=page_data.get("locale", locale),
+		tags=tag_names,
+	)
+	logger.info("Home page set — visit %s to verify", wiki_url)
+
+
+def _prune_existing_pages(client: WikiJSClient, force: bool) -> None:
+	"""Delete all existing pages from the wiki.
+
+	Fetches the current page list, asks for confirmation (unless --force),
+	and deletes every page one by one.  Intended for re-running an
+	interrupted import on a clean slate.
+	"""
+	pages = client.list_pages()
+	if not pages:
+		logger.info("No existing pages to prune")
+		return
+
+	logger.info("Found %d existing page(s) to delete", len(pages))
+	for p in pages:
+		logger.info("  - %s (id=%d)", p.get("title", p.get("path")), p["id"])
+
+	if not force:
+		print(f"\nThis will permanently delete ALL {len(pages)} page(s) from the wiki.")
+		print("This action cannot be undone.")
+		try:
+			answer = input("Continue? [y/N] ")
+		except (EOFError, KeyboardInterrupt):
+			print("Aborted")
+			sys.exit(130)
+		if answer.strip().lower() not in ("y", "yes"):
+			print("Aborted")
+			sys.exit(0)
+
+	for i, p in enumerate(pages):
+		logger.info("Deleting page %d/%d: %s", i + 1, len(pages), p.get("title", p.get("path")))
+		client.delete_page(p["id"])
+
+	logger.info("Prune complete — %d page(s) deleted", len(pages))
 
 
 def _print_dry_run_summary(dump) -> None:
@@ -158,6 +272,18 @@ def main() -> None:
 		action="store_true",
 		help="Continue importing even if some pages fail to convert",
 	)
+	parser.add_argument(
+		"--prune",
+		action="store_true",
+		help="Delete ALL existing pages from the wiki before importing. "
+		     "Useful for re-running an interrupted or incomplete import. "
+		     "Will prompt for confirmation unless --force is also passed.",
+	)
+	parser.add_argument(
+		"-f", "--force",
+		action="store_true",
+		help="Skip confirmation prompts (currently only affects --prune)",
+	)
 
 	args = parser.parse_args()
 
@@ -169,7 +295,8 @@ def main() -> None:
 		log_level = logging.INFO
 
 	try:
-		run(args.config, args.dry_run, log_level, args.skip_failed)
+		run(args.config, args.dry_run, log_level, args.skip_failed,
+		    prune=args.prune, force=args.force)
 	except FileNotFoundError as e:
 		logger.error("File not found: %s", e)
 		sys.exit(1)

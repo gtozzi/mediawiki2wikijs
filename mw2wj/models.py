@@ -22,6 +22,7 @@ class Page:
 	namespace: int
 	namespace_name: str
 	revisions: list[Revision] = field(default_factory=list)
+	categories: list[str] = field(default_factory=list)
 
 	@property
 	def is_redirect(self) -> bool:
@@ -72,6 +73,10 @@ class ConversionContext:
 		template_fallback: str = "error",
 		current_namespace: int = 0,
 		preprocess_rules: list[dict[str, str]] | None = None,
+		locale: str = "en",
+		include_metadata: bool = True,
+		file_upload_dir: str = "import_mw",
+		include_edit_description: bool = True,
 	):
 		self.category_mode = category_mode
 		self.namespace_separator = namespace_separator
@@ -80,3 +85,8 @@ class ConversionContext:
 		self.template_fallback = template_fallback
 		self.current_namespace = current_namespace
 		self.preprocess_rules = preprocess_rules or []
+		self.collected_categories: list[str] = []
+		self.locale = locale
+		self.include_metadata = include_metadata
+		self.file_upload_dir = file_upload_dir
+		self.include_edit_description = include_edit_description

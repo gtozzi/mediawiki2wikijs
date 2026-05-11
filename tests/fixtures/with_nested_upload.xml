@@ -1,0 +1,42 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ns0:mediawiki xmlns:ns0="http://www.mediawiki.org/xml/export-0.11/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.mediawiki.org/xml/export-0.11.xsd" xsi:schemaLocation="http://www.mediawiki.org/xml/export-0.11/ http://www.mediawiki.org/xml/export-0.11.xsd" version="0.11" xml:lang="en">
+  <ns0:siteinfo>
+    <ns0:sitename>TestWiki</ns0:sitename>
+    <ns0:base>http://testwiki.example.com/wiki/Main_Page</ns0:base>
+    <ns0:generator>MediaWiki 1.43</ns0:generator>
+    <ns0:case>first-letter</ns0:case>
+    <ns0:namespaces>
+      <ns0:namespace key="0" case="first-letter" />
+      <ns0:namespace key="6" case="first-letter">File</ns0:namespace>
+    </ns0:namespaces>
+  </ns0:siteinfo>
+  <ns0:page>
+    <ns0:title>File:Nested.png</ns0:title>
+    <ns0:ns>6</ns0:ns>
+    <ns0:id>1</ns0:id>
+    <ns0:revision>
+      <ns0:id>1</ns0:id>
+      <ns0:timestamp>2024-01-01T12:00:00Z</ns0:timestamp>
+      <ns0:contributor>
+        <ns0:username>Alice</ns0:username>
+        <ns0:id>1</ns0:id>
+      </ns0:contributor>
+      <ns0:comment>Uploaded file description</ns0:comment>
+      <ns0:model>wikitext</ns0:model>
+      <ns0:format>text/x-wiki</ns0:format>
+      <ns0:text xml:space="preserve" bytes="30">A nested upload test file.</ns0:text>
+      <ns0:sha1>def456def456def456def456def456def456def456</ns0:sha1>
+    </ns0:revision>
+    <ns0:upload>
+      <ns0:filename>Nested.png</ns0:filename>
+      <ns0:timestamp>2024-01-01T12:00:00Z</ns0:timestamp>
+      <ns0:contributor>
+        <ns0:username>Alice</ns0:username>
+        <ns0:id>1</ns0:id>
+      </ns0:contributor>
+      <ns0:size>128</ns0:size>
+      <ns0:sha1>nestnestnestnestnestnestnestnestnestnest</ns0:sha1>
+      <ns0:contents>iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==</ns0:contents>
+    </ns0:upload>
+  </ns0:page>
+</ns0:mediawiki>

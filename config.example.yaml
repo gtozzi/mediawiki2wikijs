@@ -15,7 +15,15 @@ exclude_namespaces:            # namespaces to skip entirely
   - Special
   - MediaWiki
   - User
+  - File
+  - Template
 template_fallback: "error"     # error | codeblock
+is_private: true               # default page visibility (true = requires login)
+locale: "en"                   # page language code (e.g. en, it, fr)
+#home_page: "pagina_principale" # rename this page path to "home" after import
+include_metadata: true           # embed revision metadata as HTML comment in page content
+include_edit_description: true  # include contributor and comment in page edit descriptions
+file_upload_dir: "import_mw"     # assets subdirectory for uploaded files
 #preprocess_rules:              # optional regex substitutions on raw wikitext
 #  - pattern: '\{\{(https?://[^\s}]+)(?:\s+([^}]*))?\}\}'
 #    replacement: '[$2]($1)'    # fix {{http://... text}} → [text](http://...)

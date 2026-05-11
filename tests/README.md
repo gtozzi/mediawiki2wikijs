@@ -4,7 +4,7 @@
 
 **Two-tier approach:**
 
-1. **Fast unit tests** (`test_parser.py`, `test_converter.py`) — use small hand-crafted XML fixtures. Run instantly, no network needed, always available. Covers edge cases and specific behaviors.
+1. **Fast unit tests** (`test_parser.py`, `test_converter.py`, `test_wikijs_client.py`) — use small hand-crafted XML fixtures or HTTP mocking. Run instantly, no network needed, always available. Covers edge cases and specific behaviors.
 
 2. **Wikipedia integration tests** (`test_wikipedia.py`) — use real Wikipedia XML exports fetched via `Special:Export`. Validates the full pipeline against real-world wikitext that exercises every code path. Downloaded on first run and cached locally.
 
@@ -17,8 +17,8 @@ python3 -m pytest tests/
 # Run in parallel (recommended — uses all CPU cores)
 python3 -m pytest tests/ -n auto
 
-# Unit tests only (no network)
-python3 -m pytest tests/test_parser.py tests/test_converter.py
+# Unit tests only (no network, no pandoc needed for client tests)
+python3 -m pytest tests/test_parser.py tests/test_converter.py tests/test_wikijs_client.py
 
 # Pre-download all Wikipedia fixtures
 python3 tests/fetch_wikipedia_fixture.py
@@ -79,7 +79,7 @@ any new fixtures that appear in the `fixtures/` directory.
 
 A live E2E test that spins up MediaWiki, creates test content, exports
 a dump, imports it into Wiki.js, and verifies the result would cover the
-two currently untested modules (`importer.py` and `wikijs_client.py`).
+one remaining untested module (`importer.py`).
 Research findings (2026-05):
 
 ### MediaWiki side — solved

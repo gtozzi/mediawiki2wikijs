@@ -71,6 +71,24 @@ def _apply_preprocess_rules(text: str, context: ConversionContext) -> str:
 	return text
 
 
+def _wikijs_link_path(title: str, context: ConversionContext) -> str:
+	"""Build a Wiki.js link target path from a page title.
+
+	Uses the same sanitization as page path creation (sanitize_path)
+	and includes the locale prefix so intra-wiki links resolve
+	to the same locale the pages are imported under.
+
+	@param title: Page title (e.g. "Audio & Video Editing")
+	@param context: Conversion context with locale and path settings
+	@returns: Path segment for use in Markdown links (e.g. "it/Audio__Video_Editing")
+	"""
+	from mw2wj.utils import sanitize_path
+	sanitized = sanitize_path(title, context.lowercase_paths)
+	if context.locale:
+		sanitized = f"{context.locale}/{sanitized}"
+	return sanitized
+
+
 def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, str]]:
 	"""Apply pre-processing before pandoc conversion.
 
@@ -91,9 +109,7 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 		target = target.removeprefix("[[")
 		target = target.removesuffix("]]")
 		target = target.split("|")[0].strip()
-		path = target.replace(" ", "_")
-		if context.lowercase_paths:
-			path = path.lower()
+		path = _wikijs_link_path(target, context)
 		return f"> Redirect to: [{target}](/{path})", link_map
 
 	try:
@@ -110,20 +126,51 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 		if not title:
 			continue
 
-		# Remove category links from text
+		# Handle category links based on category_mode
 		if ":" in title and title.split(":")[0].lower() == "category":
 			cat_name = title.split(":", 1)[1].strip()
 			logger.info("Found category: %s", cat_name)
-			try:
-				wikicode.replace(link, "")
-			except ValueError:
-				pass
+			context.collected_categories.append(cat_name)
+			if context.category_mode in ("text", "both"):
+				# Convert to a regular wikilink so pandoc renders it
+				display = f"Category: {cat_name}"
+				cat_path = _wikijs_link_path(f"Category:{cat_name}", context)
+				markdown_link = f"[{display}](/{cat_path})"
+				placeholder = f"MWLINKPLACEHOLDER{link_counter}END"
+				link_map[placeholder] = markdown_link
+				link_counter += 1
+				try:
+					wikicode.replace(link, placeholder)
+				except ValueError:
+					pass
+			else:
+				# tag or discard: strip from text
+				try:
+					wikicode.replace(link, "")
+				except ValueError:
+					pass
 			continue
 
-		# Skip file/image links — they remain as-is for pandoc
+		# Transform file/image links to markdown images pointing
+		# at the Wiki.js assets directory where files are uploaded.
 		if ":" in title:
 			prefix = title.split(":")[0].lower()
 			if prefix in ("file", "image"):
+				from mw2wj.utils import sanitize_filename
+				fname = title.split(":", 1)[1].strip()
+				fname = sanitize_filename(fname, context.lowercase_paths)
+				display = str(link.text) if link.text is not None else fname
+				if display.strip() == fname.strip():
+					display = fname.rsplit(".", 1)[0]
+				img_path = f"{context.file_upload_dir}/{fname}"
+				markdown_link = f"![{display}](/{img_path})"
+				placeholder = f"MWLINKPLACEHOLDER{link_counter}END"
+				link_map[placeholder] = markdown_link
+				link_counter += 1
+				try:
+					wikicode.replace(link, placeholder)
+				except ValueError:
+					pass
 				continue
 
 		# Build display text
@@ -131,11 +178,9 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 		if display.strip() == title.strip() and ":" in title:
 			display = title.split(":", 1)[1].strip()
 
-		# Build target path
-		path = title.replace(" ", "_")
-		if context.lowercase_paths:
-			path = path.lower()
-
+		# Build target path using same sanitization as page
+		# creation, including locale prefix
+		path = _wikijs_link_path(title, context)
 		markdown_link = f"[{display}](/{path})"
 		placeholder = f"MWLINKPLACEHOLDER{link_counter}END"
 		link_map[placeholder] = markdown_link
@@ -361,6 +406,12 @@ def _postprocess(text: str, rev: Revision, context: ConversionContext, link_map:
 	# Remove trailing whitespace on each line
 	text = "\n".join(line.rstrip() for line in text.split("\n"))
 
+	# Pandoc escapes backticks in markdown_strict output, but our
+	# wikitext sources may contain literal backtick characters
+	# (from templates, preprocess rules, or pasted content).
+	# Unescape them so code spans/fences render correctly.
+	text = text.replace(r"\`", "`")
+
 	# Replace link placeholders with actual Markdown links.
 	# Normally placeholders end with END, but tolerates the rare case
 	# where END gets stripped by downstream processing.
@@ -380,24 +431,27 @@ def _postprocess(text: str, rev: Revision, context: ConversionContext, link_map:
 	# pandoc mangling (rare — happens with adjacent formatting markers).
 	text = re.sub(r"MWLINKPLACEHOLDER\S+", "", text)
 
-	# Remove any remaining category links that pandoc may have preserved
-	text = CATEGORY_RE.sub("", text)
+	# Remove any remaining category links that pandoc may have preserved.
+	# Only needed for tag/discard modes — text/both modes keep them as links.
+	if context.category_mode in ("tag", "discard"):
+		text = CATEGORY_RE.sub("", text)
 
-	# Insert revision metadata as HTML comment
-	meta_lines = [
-		"<!-- mediawiki-revision:",
-		f"  author: {rev.contributor}",
-		f"  timestamp: {rev.timestamp.isoformat()}",
-	]
-	if rev.comment:
-		meta_lines.append(f"  comment: {rev.comment}")
-	meta_lines.append("-->")
+	# Insert revision metadata as HTML comment (unless disabled)
+	if context.include_metadata:
+		meta_lines = [
+			"<!-- mediawiki-revision:",
+			f"  author: {rev.contributor}",
+			f"  timestamp: {rev.timestamp.isoformat()}",
+		]
+		if rev.comment:
+			meta_lines.append(f"  comment: {rev.comment}")
+		meta_lines.append("-->")
 
-	match = re.match(r"^---\s*\n.*?\n---\s*\n", text, re.DOTALL)
-	if match:
-		insert_pos = match.end()
-		text = text[:insert_pos] + "\n".join(meta_lines) + "\n\n" + text[insert_pos:]
-	else:
-		text = "\n".join(meta_lines) + "\n\n" + text
+		match = re.match(r"^---\s*\n.*?\n---\s*\n", text, re.DOTALL)
+		if match:
+			insert_pos = match.end()
+			text = text[:insert_pos] + "\n".join(meta_lines) + "\n\n" + text[insert_pos:]
+		else:
+			text = "\n".join(meta_lines) + "\n\n" + text
 
 	return text

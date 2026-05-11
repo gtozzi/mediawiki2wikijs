@@ -42,7 +42,20 @@ class TestPreprocess:
 		assert len(link_map) == 1
 		placeholder = list(link_map.keys())[0]
 		assert "MWLINKPLACEHOLDER" in placeholder
-		assert link_map[placeholder] == "[links](/Internal_Link)"
+		# Link path includes locale prefix ("en" by default)
+		assert link_map[placeholder] == "[links](/en/Internal_Link)"
+
+	def test_link_path_uses_same_sanitization_as_page_creation(self):
+		"""Link targets must match the paths created by sanitize_path(),
+		including locale prefix and special-character stripping."""
+		from mw2wj.utils import sanitize_path
+		ctx = ConversionContext(locale="it")
+		result, link_map = _preprocess("[[Audio & Video Editing]]", ctx)
+		placeholder = list(link_map.keys())[0]
+		# Link target should be /it/Audio__Video_Editing (& stripped, double
+		# underscore from _&_ collapsing — same as sanitize_path produces)
+		expected_path = f"{ctx.locale}/{sanitize_path('Audio & Video Editing', ctx.lowercase_paths)}"
+		assert link_map[placeholder] == f"[Audio & Video Editing](/{expected_path})"
 
 	def test_category_removal(self):
 		ctx = ConversionContext(category_mode="tag")
@@ -211,10 +224,36 @@ class TestPostProcessing:
 		assert "author: Bob" in result
 		assert "comment:" not in result
 
+	def test_include_metadata_false_suppresses_comment(self):
+		rev = make_rev("Hello", author="Alice", comment="Fixed typo")
+		result = _postprocess("Hello", rev, ConversionContext(include_metadata=False), {})
+		assert "<!-- mediawiki-revision:" not in result
+		assert "author:" not in result
+
 	def test_category_regex_removal(self):
 		result = CATEGORY_RE.sub("", "Text [[Category:Foo]] more")
 		assert "[[Category:Foo]]" not in result
 		assert "Text  more" in result
+
+	def test_backtick_unescaping(self):
+		"""Pandoc-escaped backticks must be restored to literal backticks."""
+		rev = make_rev("test")
+		bs = chr(92)  # backslash
+		bt = chr(96)  # backtick
+		escaped = f"{bs}{bt}{bs}{bt}{bs}{bt}shell\ncode\n{bs}{bt}{bs}{bt}{bs}{bt}"
+		result = _postprocess(escaped, rev, ConversionContext(), {})
+		assert (bs + bt) not in result, f"Escaped backtick still in output: {repr(result)}"
+		assert "```" in result, f"No code fence found: {repr(result)}"
+
+	def test_backtick_unescaping_inline(self):
+		"""Inline escaped backticks must also be restored."""
+		rev = make_rev("test")
+		bs = chr(92)  # backslash
+		bt = chr(96)  # backtick
+		escaped = f"Use {bs}{bt}ls -la{bs}{bt} to list files"
+		result = _postprocess(escaped, rev, ConversionContext(), {})
+		assert (bs + bt) not in result, f"Escaped backtick still in output: {repr(result)}"
+		assert "`ls -la`" in result, f"Inline code not found: {repr(result)}"
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="pandoc not installed")
 class TestImageHandling:
@@ -241,7 +280,7 @@ class TestImageHandling:
 				assert len(md) > 50
 
 	def test_file_wikilink_produces_img_tag(self):
-		"""[[File:name.png]] must become an <img> tag in output."""
+		"""[[File:name.png]] must produce a markdown image link."""
 		from mw2wj.converter import convert_revision
 		from mw2wj.parser import parse_dump
 		dump = parse_dump("tests/fixtures/with_upload.xml")
@@ -249,13 +288,13 @@ class TestImageHandling:
 		for page in dump.pages:
 			for rev in page.revisions:
 				md = convert_revision(rev, ctx)
-				assert "<img" in md, f"No <img> tag in output: {repr(md[:300])}"
-				assert "TestImage.png" in md, (
-					f"Filename not found in output: {repr(md[:300])}"
+				assert "![" in md, f"No image syntax in output: {repr(md[:300])}"
+				assert "](/import_mw/TestImage.png)" in md, (
+					f"Image path not found in output: {repr(md[:300])}"
 				)
 
 	def test_file_wikilink_with_caption(self):
-		"""[[File:name.png|thumb|caption]] produces <figure> with <figcaption>."""
+		"""[[File:name.png|thumb|caption]] produces markdown image with caption."""
 		from mw2wj.converter import convert_revision
 		from mw2wj.parser import parse_dump
 		dump = parse_dump("tests/fixtures/with_upload.xml")
@@ -263,9 +302,40 @@ class TestImageHandling:
 		for page in dump.pages:
 			for rev in page.revisions:
 				md = convert_revision(rev, ctx)
-				assert "<figure>" in md, f"No <figure> in output"
-				assert "<figcaption>" in md, f"No <figcaption> in output"
+				assert "![" in md, f"No image syntax in output"
 				assert "A test caption" in md, f"Caption not in output"
+
+	def test_file_link_uses_upload_dir(self):
+		"""Image link path must include the configured file_upload_dir."""
+		from mw2wj.converter import convert_revision
+		from mw2wj.parser import parse_dump
+		dump = parse_dump("tests/fixtures/with_upload.xml")
+		ctx = ConversionContext(
+			template_fallback="codeblock",
+			file_upload_dir="custom_uploads",
+		)
+		for page in dump.pages:
+			for rev in page.revisions:
+				md = convert_revision(rev, ctx)
+				assert "](/custom_uploads/TestImage.png)" in md, (
+					f"Expected /custom_uploads/ path: {repr(md[:300])}"
+				)
+
+	def test_file_link_lowercased(self):
+		"""Image link filename must be lowercased when lowercase_paths is True."""
+		from mw2wj.converter import convert_revision
+		from mw2wj.parser import parse_dump
+		dump = parse_dump("tests/fixtures/with_upload.xml")
+		ctx = ConversionContext(
+			template_fallback="codeblock",
+			lowercase_paths=True,
+		)
+		for page in dump.pages:
+			for rev in page.revisions:
+				md = convert_revision(rev, ctx)
+				assert "](/import_mw/testimage.png)" in md, (
+					f"Expected lowercased filename: {repr(md[:300])}"
+				)
 
 	def test_upload_filename_matches_img_src(self):
 		"""The <img src> filename must match UploadedFile.filename from the dump."""

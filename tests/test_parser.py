@@ -79,6 +79,21 @@ def test_parse_upload_dump():
 	assert uf.size > 0  # 1x1 transparent PNG
 
 
+def test_parse_nested_upload_in_page():
+	"""<upload> elements nested inside <page> must be parsed as files."""
+	dump = parse_dump(str(FIXTURES / "with_nested_upload.xml"))
+	assert len(dump.pages) == 1
+	assert len(dump.files) == 1
+
+	uf = dump.files[0]
+	assert uf.filename == "Nested.png"
+	assert uf.contributor == "Alice"
+	assert uf.sha1 == "nestnestnestnestnestnestnestnestnestnest"
+
+	page = dump.pages[0]
+	assert page.namespace == 6  # File namespace
+
+
 def test_missing_file_raises():
 	with pytest.raises(FileNotFoundError):
 		parse_dump(str(FIXTURES / "nonexistent.xml"))
