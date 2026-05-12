@@ -2,6 +2,32 @@
 
 Migrate a MediaWiki XML dump into [Wiki.js](https://js.wiki) via its API.
 
+## Status
+
+This tool has been used for a single production migration of a few hundred pages with uploaded files and full revision history.
+It is stable for that scope, but not battle-tested across diverse MediaWiki setups.
+If your wiki uses unusual templates, heavily nested parser functions, or custom extensions, expect to write template plugins and preprocess rules. The plugin system was designed for this: see [Template Plugins](#template-plugins).
+
+## Why XML dump, not the API?
+
+MediaWiki's API is designed for interactive browsing and editing, not bulk export.
+Key limitations that pushed toward `dumpBackup.php`:
+
+- **Revision history**: the API can list revisions, but fetching each
+  one individually is slow on large wikis. The XML dump packs all
+  revisions in a single file.
+- **Uploaded files**: the API has no endpoint to download the original
+  binary of an uploaded file. `dumpBackup.php --uploads --include-files`
+  embeds them directly in the dump as base64.
+- **Consistency**: the dump is a point-in-time snapshot — no risk of
+  pages or files changing while you are mid-import.
+- **Offline iteration**: parsing and conversion run against a local
+  file, so you can iterate on template plugins and preprocess rules
+  without touching a production server.
+
+The trade-off: generating the dump requires shell access to the MediaWiki server.
+If you are a wiki user without server access, the API route (with its limitations) may be your only option.
+
 ## Features
 
 - **Full revision history** — every revision of every page is imported as a page update, preserving edit order
@@ -25,7 +51,7 @@ Migrate a MediaWiki XML dump into [Wiki.js](https://js.wiki) via its API.
 ## Installation
 
 ```bash
-git clone <this-repo-url>
+git clone https://github.com/gtozzi/mediawiki2wikijs.git
 cd mediawiki2wikijs
 pip install -r requirements.txt
 ```
@@ -182,4 +208,6 @@ The configured `locale` must already be installed in Wiki.js (Admin → Locales)
 
 ## License
 
-MIT
+GNU Affero General Public License v3.0 (AGPL-3.0) — see [LICENSE](LICENSE).
+
+Copyright (C) 2026  Gabriele Tozzi <gabriele@tozzi.eu>

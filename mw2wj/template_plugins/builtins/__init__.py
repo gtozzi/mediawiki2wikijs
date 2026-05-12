@@ -1,3 +1,8 @@
+# mediawiki2wikijs — MediaWiki to Wiki.js migration tool
+# Copyright (C) 2026  Gabriele Tozzi <gabriele@tozzi.eu>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+
 from mw2wj.template_plugins.builtins.box_code import BoxCodePlugin
 from mw2wj.template_plugins.builtins.box_file import BoxFilePlugin
 from mw2wj.template_plugins.builtins.cmd import CmdPlugin

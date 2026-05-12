@@ -1,3 +1,8 @@
+# mediawiki2wikijs — MediaWiki to Wiki.js migration tool
+# Copyright (C) 2026  Gabriele Tozzi <gabriele@tozzi.eu>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+
 from __future__ import annotations
 
 import re
