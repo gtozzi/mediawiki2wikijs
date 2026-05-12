@@ -76,17 +76,59 @@ def _wikijs_link_path(title: str, context: ConversionContext) -> str:
 
 	Uses the same sanitization as page path creation (sanitize_path)
 	and includes the locale prefix so intra-wiki links resolve
-	to the same locale the pages are imported under.
+	to the same locale the pages are imported under.  Anchors
+	(#section) are preserved after the sanitized path.
 
-	@param title: Page title (e.g. "Audio & Video Editing")
+	@param title: Page title (e.g. "Audio & Video Editing#Section")
 	@param context: Conversion context with locale and path settings
-	@returns: Path segment for use in Markdown links (e.g. "it/Audio__Video_Editing")
+	@returns: Path segment for use in Markdown links (e.g. "it/Audio__Video_Editing#Section")
 	"""
 	from mw2wj.utils import sanitize_path
+	anchor = ""
+	if "#" in title:
+		title, anchor_part = title.rsplit("#", 1)
+		anchor = f"#{anchor_part}"
 	sanitized = sanitize_path(title, context.lowercase_paths)
 	if context.locale:
 		sanitized = f"{context.locale}/{sanitized}"
-	return sanitized
+	return sanitized + anchor
+
+
+def _protect_code_fences(text: str, fence_map: dict[str, str]) -> str:
+	"""Replace markdown fenced code blocks with placeholders.
+
+	Our template plugins generate proper markdown code fences, but
+	pandoc's mediawiki reader does not understand them — it collapses
+	newlines, entity-encodes > < &, and treats # as a numbered list.
+	By replacing the entire fence block with a plain-text placeholder
+	we let it pass through pandoc untouched, then restore it in
+	_postprocess.
+
+	@param text: Wikitext with embedded markdown code fences
+	@param fence_map: Dict to populate with placeholder→fence mappings
+	@returns: Text with code fences replaced by MWCODEFENCE{n}END
+	"""
+	FENCE_RE = re.compile(r'```(\w*)\n(.*?)\n```', re.DOTALL)
+
+	def _replace(match: re.Match) -> str:
+		lang = match.group(1) or ""
+		content = match.group(2)
+		key = f"MWCODEFENCE{len(fence_map)}END"
+		fence_map[key] = f"```{lang}\n{content}\n```\n"
+		return key
+
+	return FENCE_RE.sub(_replace, text)
+
+
+def _restore_code_fences(text: str, fence_map: dict[str, str]) -> str:
+	"""Restore code fences from placeholders saved by _protect_code_fences."""
+	FENCE_PLACEHOLDER_RE = re.compile(r'MWCODEFENCE\d+END')
+
+	def _restore(match: re.Match) -> str:
+		key = match.group(0)
+		return fence_map.get(key, key)
+
+	return FENCE_PLACEHOLDER_RE.sub(_restore, text)
 
 
 def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, str]]:
@@ -231,6 +273,13 @@ def _preprocess(text: str, context: ConversionContext) -> tuple[str, dict[str, s
 			logger.warning("Could not replace template '%s' in-place", name)
 
 	text = str(wikicode)
+
+	# Protect generated markdown code fences from pandoc's mediawiki
+	# reader.  Pandoc does not understand fenced code blocks in
+	# mediawiki input: it collapses newlines, treats # as numbered
+	# lists, entity-encodes >, and backslash-escapes special chars.
+	context.code_fence_map = {}
+	text = _protect_code_fences(text, context.code_fence_map)
 
 	# Strip <ref> tags — references don't translate well to Markdown and
 	# broken ref tags (from template stripping) crash pandoc.
@@ -401,16 +450,63 @@ def _pandoc_convert(text: str) -> str:
 	return result.stdout
 
 
+def _decode_entities_in_fences(text: str) -> str:
+	"""Decode HTML entities inside fenced code blocks.
+
+	Pandoc's markdown_strict writer entity-encodes > < & inside
+	code blocks.  Wiki.js and most renderers display these as
+	literal characters inside code, so we must restore them.
+	"""
+	def _decode(match: re.Match) -> str:
+		block = match.group(0)
+		block = block.replace("&amp;", "&")
+		block = block.replace("&gt;", ">")
+		block = block.replace("&lt;", "<")
+		return block
+
+	return re.sub(r'```.*?```', _decode, text, flags=re.DOTALL)
+
+
+def _decode_entities_inline(text: str) -> str:
+	"""Decode HTML entities inside inline backtick code spans."""
+	def _decode(match: re.Match) -> str:
+		span = match.group(0)
+		span = span.replace("&amp;", "&")
+		span = span.replace("&gt;", ">")
+		span = span.replace("&lt;", "<")
+		return span
+
+	return re.sub(r'`[^`]+`', _decode, text)
+
+
 def _postprocess(text: str, rev: Revision, context: ConversionContext, link_map: dict[str, str]) -> str:
 	"""Apply post-processing to the pandoc output."""
 	# Remove trailing whitespace on each line
 	text = "\n".join(line.rstrip() for line in text.split("\n"))
 
-	# Pandoc escapes backticks in markdown_strict output, but our
-	# wikitext sources may contain literal backtick characters
-	# (from templates, preprocess rules, or pasted content).
-	# Unescape them so code spans/fences render correctly.
+	# Pandoc escapes backticks in markdown_strict output and
+	# collapses multi-line code fences to a single line.
+	# Restore proper formatting: first unescape, then split
+	# single-line fences into opening + content + closing.
 	text = text.replace(r"\`", "`")
+	text = re.sub(r'(`{3,})(\S*)\s+(.+?)\s*(`{3,})\s*$',
+		r'\1\2\n\3\n\4', text, flags=re.MULTILINE)
+
+	# Pandoc may entity-encode > < & inside code blocks.
+	# Decode them so they render as literal characters.
+	# Must run BEFORE restoring protected fences — those were
+	# never seen by pandoc and must stay verbatim.
+	text = _decode_entities_in_fences(text)
+	text = _decode_entities_inline(text)
+
+	# Restore code fences that were protected from pandoc
+	fence_map = getattr(context, 'code_fence_map', None)
+	if fence_map:
+		text = _restore_code_fences(text, fence_map)
+
+	# Ensure fenced code blocks start on a new line.
+	# Pandoc may concatenate them with preceding text.
+	text = re.sub(r'([^\n])```', r'\1\n```', text)
 
 	# Replace link placeholders with actual Markdown links.
 	# Normally placeholders end with END, but tolerates the rare case

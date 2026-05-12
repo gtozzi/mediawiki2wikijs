@@ -20,25 +20,16 @@ class CommandlinePlugin(TemplatePlugin):
 		return "Commandline"
 
 	def convert(self, template: Template, context: ConversionContext) -> str:
+		import re
+
 		cmd = ""
 		if template.has("cmd"):
 			cmd = str(template.get("cmd").value).strip()
 
-		# Determine prompt: # for root, $ for user
-		is_root = False
-		if template.has("root"):
-			root_val = str(template.get("root").value).strip().lower()
-			is_root = root_val not in ("", "no", "0", "false")
-		prompt = "# " if is_root else "$ "
-
-		# Normalise trailing newlines
-		cmd = cmd.rstrip("\n")
+		# Strip <nowiki> tags so pandoc does not escape > to &gt; inside them
+		cmd = re.sub(r"</?nowiki>", "", cmd, flags=re.IGNORECASE)
 
 		if not cmd:
-			return "```shell\n```"
+			return ""
 
-		# Prefix each non-empty line with the prompt
-		lines = cmd.split("\n")
-		prompted = "\n".join(prompt + line if line.strip() else line for line in lines)
-
-		return f"```shell\n{prompted}\n```"
+		return f"```shell\n{cmd}\n```"

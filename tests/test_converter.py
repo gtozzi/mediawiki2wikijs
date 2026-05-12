@@ -78,17 +78,21 @@ class TestPreprocess:
 	def test_commandline_plugin_simple(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess("{{Commandline|cmd=echo hello}}", ctx)
-		assert "```shell" in result
-		assert "$ echo hello" in result
+		assert "MWCODEFENCE0END" in result
+		assert "```shell" not in result
+		assert ctx.code_fence_map["MWCODEFENCE0END"] == "```shell\necho hello\n```\n"
 
 	def test_commandline_plugin_multiline(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess(
 			"{{Commandline|cmd=line1\nline2}}", ctx
 		)
-		assert "```shell" in result
-		assert "$ line1" in result
-		assert "$ line2" in result
+		assert "MWCODEFENCE0END" in result
+		assert "line1" not in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert "```shell" in fence
+		assert "line1\nline2" in fence
+		assert fence.endswith("```\n")
 
 	def test_commandline_plugin_root_prompt(self):
 		ctx = ConversionContext()
@@ -96,20 +100,75 @@ class TestPreprocess:
 			"{{Commandline|root=yes|cmd=mplayer -v -dvd-device /dev/dvd dvd://1 > info.txt}}",
 			ctx,
 		)
-		assert "```shell" in result
-		assert "# mplayer" in result
+		assert "MWCODEFENCE0END" in result
+		assert "mplayer" not in result
 		assert "root=yes" not in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert "mplayer" in fence
+		assert "> info.txt" in fence
 
 	def test_commandline_plugin_root_no(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess("{{Commandline|root=no|cmd=ls}}", ctx)
-		assert "```shell" in result
-		assert "$ ls" in result
+		assert "MWCODEFENCE0END" in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert "ls" in fence
 
 	def test_commandline_plugin_empty_cmd(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess("{{Commandline|cmd=}}", ctx)
-		assert "```shell" in result
+		assert "MWCODEFENCE" not in result
+
+	def test_commandline_plugin_nowiki(self):
+		"""nowiki-tagged cmd content must stay verbatim, protected from pandoc."""
+		ctx = ConversionContext()
+		result, link_map = _preprocess(
+			"{{Commandline|cmd=<nowiki>D:\\i386> adprep</nowiki>}}", ctx
+		)
+		assert "MWCODEFENCE0END" in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert "&gt;" not in fence
+		assert "D:\\i386> adprep" in fence
+		assert fence == "```shell\nD:\\i386> adprep\n```\n"
+
+	def test_commandline_plugin_nowiki_multiline(self):
+		"""Multiline nowiki content must preserve all newlines."""
+		ctx = ConversionContext()
+		result, link_map = _preprocess(
+			"{{Commandline|cmd=<nowiki>D:\\i386> adprep /forestprep\nD:\\i386> adprep /domainprep</nowiki>}}",
+			ctx,
+		)
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert "adprep /forestprep" in fence
+		assert "adprep /domainprep" in fence
+		lines = fence.split("\n")
+		assert lines[1] == "D:\\i386> adprep /forestprep"
+		assert lines[2] == "D:\\i386> adprep /domainprep"
+
+	def test_commandline_plugin_nowiki_preserves_weird_text(self):
+		"""All nowiki content must stay verbatim, including special chars."""
+		ctx = ConversionContext()
+		weird = "<nowiki>[[Link]] {{Template}} &amp; &gt; &lt; # list * bullet</nowiki>"
+		result, link_map = _preprocess(
+			f"{{{{Commandline|cmd={weird}}}}}", ctx
+		)
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert "[[Link]]" in fence
+		assert "{{Template}}" in fence
+		assert "&amp;" in fence
+		assert "# list" in fence
+		assert "* bullet" in fence
+
+	def test_link_anchor_preserved(self):
+		"""[[Page#section]] must preserve the anchor in the link target."""
+		ctx = ConversionContext(locale="it", lowercase_paths=True)
+		result, link_map = _preprocess("[[Android#Sviluppo|Android]]", ctx)
+		placeholder = list(link_map.keys())[0]
+		link = link_map[placeholder]
+		assert "#Sviluppo" in link, (
+			f"Anchor missing in link: {repr(link)}"
+		)
+		assert "[Android](/it/android#Sviluppo)" == link
 
 	def test_filename_plugin(self):
 		ctx = ConversionContext()
@@ -124,18 +183,18 @@ class TestPreprocess:
 	def test_boxcode_plugin(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess("{{Box Code|swap setup|<nowiki>#/bin/sh\nmkswap /dev/sda</nowiki>}}", ctx)
-		assert "```text" in result
-		assert "# Code: swap setup" in result
-		assert "#/bin/sh" in result
-		assert "mkswap /dev/sda" in result
-		assert "<nowiki>" not in result
+		assert "MWCODEFENCE0END" in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert fence == "```text\n# Code: swap setup\n#/bin/sh\nmkswap /dev/sda\n```\n"
+		assert "<nowiki>" not in fence
 
 	def test_boxcode_plugin_no_desc(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess("{{Box Code||echo hello}}", ctx)
-		assert "```text" in result
-		assert "echo hello" in result
-		assert "# Code:" not in result
+		assert "MWCODEFENCE0END" in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert fence == "```text\necho hello\n```\n"
+		assert "# Code:" not in fence
 
 	def test_boxcode_plugin_empty(self):
 		ctx = ConversionContext()
@@ -155,17 +214,17 @@ class TestPreprocess:
 	def test_boxfile_plugin(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess("{{Box File|name=fstab|content=<nowiki>/dev/sda1 / ext4 defaults 0 1</nowiki>}}", ctx)
-		assert "```text" in result
-		assert "# File: fstab" in result
-		assert "/dev/sda1" in result
-		assert "<nowiki>" not in result
+		assert "MWCODEFENCE0END" in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert fence == "```text\n# File: fstab\n/dev/sda1 / ext4 defaults 0 1\n```\n"
+		assert "<nowiki>" not in fence
 
 	def test_boxfile_scroll_alias(self):
 		ctx = ConversionContext()
 		result, link_map = _preprocess("{{Box File Scroll|name=mdadm.conf|content=DEVICE /dev/sda}}", ctx)
-		assert "```text" in result
-		assert "# File: mdadm.conf" in result
-		assert "DEVICE /dev/sda" in result
+		assert "MWCODEFENCE0END" in result
+		fence = ctx.code_fence_map["MWCODEFENCE0END"]
+		assert fence == "```text\n# File: mdadm.conf\nDEVICE /dev/sda\n```\n"
 
 	def test_boxfile_plugin_empty(self):
 		ctx = ConversionContext()
@@ -254,6 +313,73 @@ class TestPostProcessing:
 		result = _postprocess(escaped, rev, ConversionContext(), {})
 		assert (bs + bt) not in result, f"Escaped backtick still in output: {repr(result)}"
 		assert "`ls -la`" in result, f"Inline code not found: {repr(result)}"
+
+	def test_entity_decode_in_fence(self):
+		"""HTML entities inside fenced code blocks must be decoded."""
+		rev = make_rev("test")
+		result = _postprocess(
+			"```shell\necho a &gt; b &amp;&amp; c &lt; d\n```",
+			rev, ConversionContext(), {},
+		)
+		assert "&gt;" not in result
+		assert "&lt;" not in result
+		assert "&amp;" not in result
+		assert ">" in result
+		assert "<" in result
+		assert "&&" in result
+		assert "echo a > b && c < d" in result
+
+	def test_entity_decode_inline(self):
+		"""HTML entities inside inline backticks must be decoded."""
+		rev = make_rev("test")
+		result = _postprocess(
+			"Run `adb backup -f &lt;file&gt;` to backup",
+			rev, ConversionContext(), {},
+		)
+		assert "&lt;" not in result
+		assert "&gt;" not in result
+		assert "`adb backup -f <file>`" in result
+
+	def test_fence_starts_on_newline(self):
+		"""Fenced code blocks must start on a new line."""
+		rev = make_rev("test")
+		result = _postprocess(
+			"Some text```shell\nls\n```",
+			rev, ConversionContext(), {},
+		)
+		assert "text\n```shell" in result
+
+	def test_code_fence_restore(self):
+		"""Protected code fences must be restored from context.code_fence_map."""
+		rev = make_rev("test")
+		ctx = ConversionContext()
+		ctx.code_fence_map = {
+			"MWCODEFENCE0END": "```shell\necho hello\n```\n",
+		}
+		result = _postprocess("Run MWCODEFENCE0END now", rev, ctx, {})
+		assert "MWCODEFENCE" not in result
+		assert "```shell\necho hello\n```\n" in result
+
+	def test_code_fence_restore_multiline(self):
+		"""Multiline code fences must be restored with all newlines intact."""
+		rev = make_rev("test")
+		ctx = ConversionContext()
+		ctx.code_fence_map = {
+			"MWCODEFENCE0END": "```shell\nline1\nline2\nline3\n```\n",
+		}
+		ctx_no_meta = ConversionContext(include_metadata=False)
+		ctx_no_meta.code_fence_map = {
+			"MWCODEFENCE0END": "```shell\nline1\nline2\nline3\n```\n",
+		}
+		result = _postprocess("MWCODEFENCE0END", rev, ctx_no_meta, {})
+		lines = result.split("\n")
+		assert lines[0] == "```shell"
+		assert lines[1] == "line1"
+		assert lines[2] == "line2"
+		assert lines[3] == "line3"
+		assert lines[4] == "```"
+
+
 
 @pytest.mark.skipif(not HAS_PANDOC, reason="pandoc not installed")
 class TestImageHandling:
@@ -351,3 +477,68 @@ class TestImageHandling:
 					assert filename in md, (
 						f"Uploaded file '{filename}' not referenced in output"
 					)
+
+
+@pytest.mark.skipif(not HAS_PANDOC, reason="pandoc not installed")
+class TestFullPipeline:
+	"""End-to-end tests verifying code fences survive the full conversion."""
+
+	def test_multiline_nowiki_preserves_newlines(self):
+		"""Two commands on separate lines must stay on separate lines."""
+		from mw2wj.converter import convert_revision
+		rev = make_rev(
+			"{{Commandline|cmd=<nowiki>D:\\i386> adprep /forestprep\n"
+			"D:\\i386> adprep /domainprep</nowiki>}}"
+		)
+		ctx = ConversionContext()
+		md = convert_revision(rev, ctx)
+		lines = md.split("\n")
+		fence_start = None
+		fence_end = None
+		for i, line in enumerate(lines):
+			if line == "```shell":
+				fence_start = i
+			elif line == "```" and fence_start is not None:
+				fence_end = i
+				break
+		assert fence_start is not None, f"No opening fence found in:\n{md}"
+		assert fence_end is not None, f"No closing fence found in:\n{md}"
+		code_lines = lines[fence_start + 1:fence_end]
+		assert len(code_lines) >= 2, (
+			f"Expected at least 2 code lines, got {len(code_lines)}: {code_lines}"
+		)
+		assert "adprep /forestprep" in code_lines[0]
+		assert "adprep /domainprep" in code_lines[1]
+
+	def test_hash_preserved_in_code_block(self):
+		"""# at the start of a code line must not become a numbered list."""
+		from mw2wj.converter import convert_revision
+		rev = make_rev(
+			"{{Commandline|cmd=<nowiki># mplayer -v -dvd-device "
+			"/dev/dvd dvd://1 > info.txt</nowiki>}}"
+		)
+		ctx = ConversionContext()
+		md = convert_revision(rev, ctx)
+		assert "1. mplayer" not in md, (
+			f"# was converted to numbered list:\n{md}"
+		)
+		assert "mplayer" in md
+		assert "# mplayer" in md, (
+			f"# comment not preserved:\n{md}"
+		)
+
+	def test_weird_text_in_nowiki_preserved(self):
+		"""Special characters inside <nowiki> must stay verbatim."""
+		from mw2wj.converter import convert_revision
+		rev = make_rev(
+			"{{Commandline|cmd=<nowiki>[[Link]] {{Template}} "
+			"&amp; # list * bullet</nowiki>}}"
+		)
+		ctx = ConversionContext()
+		md = convert_revision(rev, ctx)
+		assert "[[Link]]" in md
+		assert "{{Template}}" in md
+		assert "&amp;" in md
+		assert "# list" in md
+		assert "* bullet" in md
+
